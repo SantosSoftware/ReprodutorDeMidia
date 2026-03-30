@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --color-win-surface: #1c1c1c;
+  --color-win-elevated: #2d2d2d;
+  --color-win-border: #3d3d3d;
+  --color-win-accent: #60cdff;
+  --color-win-muted: #9ca3af;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+}
