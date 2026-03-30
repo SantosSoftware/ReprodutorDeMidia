@@ -19,6 +19,7 @@ export type ApiTrack = {
   artistName: string
   /** Capa do álbum desta faixa (para o player). */
   albumCoverUrl: string | null
+  playCount: number
   streamUrl: string
 }
 
@@ -51,6 +52,20 @@ export async function fetchTracks(albumId?: number): Promise<ApiTrack[]> {
 export async function fetchTracksByArtist(artistId: number): Promise<ApiTrack[]> {
   const r = await fetch(`${API}/api/tracks?artistId=${artistId}`)
   if (!r.ok) throw new Error('Não foi possível carregar as faixas do artista')
+  return r.json()
+}
+
+/** Top faixas por número de reproduções (playlist automática). */
+export async function fetchTopTracks(limit = 50): Promise<ApiTrack[]> {
+  const r = await fetch(`${API}/api/tracks/top?limit=${limit}`)
+  if (!r.ok) throw new Error('Não foi possível carregar o top de faixas')
+  return r.json()
+}
+
+/** Regista uma reprodução válida (chamado pelo cliente após ≥15 s ou faixa curta completa). */
+export async function registerTrackPlay(trackId: number): Promise<{ id: number; playCount: number }> {
+  const r = await fetch(`${API}/api/tracks/${trackId}/play`, { method: 'POST' })
+  if (!r.ok) throw new Error('Falha ao registar reprodução')
   return r.json()
 }
 

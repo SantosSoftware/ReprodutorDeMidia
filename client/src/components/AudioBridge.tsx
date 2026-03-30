@@ -1,5 +1,8 @@
 import { useEffect, useRef } from 'react'
+import { registerTrackPlay } from '../lib/api'
 import { usePlaybackStore } from '../stores/playbackStore'
+
+const PLAY_THRESHOLD_SEC = 15
 
 export function AudioBridge() {
   const ref = useRef<HTMLAudioElement>(null)
@@ -14,6 +17,13 @@ export function AudioBridge() {
   const clearSeek = usePlaybackStore((s) => s.clearSeek)
 
   const track = queue[currentIndex] ?? null
+  const playCountedRef = useRef(false)
+  const lastTimeRef = useRef(0)
+
+  useEffect(() => {
+    playCountedRef.current = false
+    lastTimeRef.current = 0
+  }, [track?.id])
 
   useEffect(() => {
     const el = ref.current
@@ -47,14 +57,50 @@ export function AudioBridge() {
     clearSeek()
   }, [pendingSeek, clearSeek, track?.id])
 
+  function tryRegisterPlay(trackId: number) {
+    if (playCountedRef.current) return
+    playCountedRef.current = true
+    void registerTrackPlay(trackId).catch(() => {})
+  }
+
+  function handleTimeUpdate() {
+    const el = ref.current
+    const t = el?.currentTime ?? 0
+    const dur = el?.duration
+    setProgress(t)
+
+    if (!track) return
+
+    if (t < 0.5 && lastTimeRef.current > 5) {
+      playCountedRef.current = false
+    }
+    lastTimeRef.current = t
+
+    if (playCountedRef.current) return
+    if (typeof dur !== 'number' || !Number.isFinite(dur) || dur <= 0) return
+
+    if (dur >= PLAY_THRESHOLD_SEC && t >= PLAY_THRESHOLD_SEC) {
+      tryRegisterPlay(track.id)
+    }
+  }
+
+  function handleEnded() {
+    const el = ref.current
+    const d = el?.duration ?? 0
+    if (track && !playCountedRef.current && Number.isFinite(d) && d > 0 && d < PLAY_THRESHOLD_SEC) {
+      tryRegisterPlay(track.id)
+    }
+    next()
+  }
+
   return (
     <audio
       ref={ref}
       className="hidden"
       preload="metadata"
-      onTimeUpdate={() => setProgress(ref.current?.currentTime ?? 0)}
+      onTimeUpdate={handleTimeUpdate}
       onLoadedMetadata={() => setDuration(ref.current?.duration ?? 0)}
-      onEnded={() => next()}
+      onEnded={handleEnded}
     />
   )
 }

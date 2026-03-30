@@ -11,6 +11,7 @@ import {
   getMusicLibraryPath,
   getTrackById,
   getTrackWithRelations,
+  incrementTrackPlayCount,
   initDb,
   registerLibraryRoot,
   setMusicLibraryPath,
@@ -175,7 +176,7 @@ app.get('/api/tracks', (req, res) => {
     }
     const rows = db
       .prepare(
-        `SELECT t.id, t.title, t.duration_seconds, t.track_number, t.file_path,
+        `SELECT t.id, t.title, t.duration_seconds, t.track_number, t.file_path, t.play_count,
                 a.title AS album_title, a.cover_path AS album_cover_path, ar.name AS artist_name, a.id AS album_id
          FROM tracks t
          JOIN albums a ON t.album_id = a.id
@@ -196,7 +197,7 @@ app.get('/api/tracks', (req, res) => {
     }
     const rows = db
       .prepare(
-        `SELECT t.id, t.title, t.duration_seconds, t.track_number, t.file_path,
+        `SELECT t.id, t.title, t.duration_seconds, t.track_number, t.file_path, t.play_count,
                 a.title AS album_title, a.cover_path AS album_cover_path, ar.name AS artist_name, a.id AS album_id
          FROM tracks t
          JOIN albums a ON t.album_id = a.id
@@ -211,7 +212,7 @@ app.get('/api/tracks', (req, res) => {
 
   const rows = db
     .prepare(
-      `SELECT t.id, t.title, t.duration_seconds, t.track_number, t.file_path,
+      `SELECT t.id, t.title, t.duration_seconds, t.track_number, t.file_path, t.play_count,
               a.title AS album_title, a.cover_path AS album_cover_path, ar.name AS artist_name, a.id AS album_id
        FROM tracks t
        JOIN albums a ON t.album_id = a.id
@@ -228,6 +229,7 @@ type TrackQueryRow = {
   duration_seconds: number | null
   track_number: number | null
   file_path: string
+  play_count: number
   album_title: string
   album_cover_path: string | null
   artist_name: string
@@ -243,12 +245,52 @@ function formatTrackRow(r: TrackQueryRow) {
     albumId: r.album_id,
     albumTitle: r.album_title,
     artistName: r.artist_name,
+    playCount: r.play_count,
     albumCoverUrl: r.album_cover_path
       ? `/api/covers/${encodeURIComponent(r.album_cover_path)}`
       : null,
     streamUrl: `/api/tracks/${r.id}/stream`,
   }
 }
+
+app.get('/api/tracks/top', (req, res) => {
+  const raw = req.query.limit
+  const limit = raw != null && raw !== '' ? Math.min(100, Math.max(1, Number(raw))) : 50
+  if (Number.isNaN(limit)) {
+    res.status(400).json({ error: 'limit inválido' })
+    return
+  }
+  const db = getDb()
+  const rows = db
+    .prepare(
+      `SELECT t.id, t.title, t.duration_seconds, t.track_number, t.file_path, t.play_count,
+              a.title AS album_title, a.cover_path AS album_cover_path, ar.name AS artist_name, a.id AS album_id
+       FROM tracks t
+       JOIN albums a ON t.album_id = a.id
+       JOIN artists ar ON a.artist_id = ar.id
+       WHERE t.play_count > 0
+       ORDER BY t.play_count DESC, t.title COLLATE NOCASE
+       LIMIT ?`,
+    )
+    .all(limit) as TrackQueryRow[]
+  res.json(rows.map(formatTrackRow))
+})
+
+app.post('/api/tracks/:id/play', (req, res) => {
+  const id = Number(req.params.id)
+  if (Number.isNaN(id)) {
+    res.status(400).json({ error: 'id inválido' })
+    return
+  }
+  const row = getTrackById(id)
+  if (!row) {
+    res.status(404).json({ error: 'Faixa não encontrada' })
+    return
+  }
+  incrementTrackPlayCount(id)
+  const updated = getTrackById(id)
+  res.json({ id, playCount: updated?.play_count ?? row.play_count + 1 })
+})
 
 app.get('/api/tracks/:id', (req, res) => {
   const id = Number(req.params.id)
@@ -259,7 +301,7 @@ app.get('/api/tracks/:id', (req, res) => {
   const db = getDb()
   const row = db
     .prepare(
-      `SELECT t.id, t.title, t.duration_seconds, t.track_number, t.file_path,
+      `SELECT t.id, t.title, t.duration_seconds, t.track_number, t.file_path, t.play_count,
               a.title AS album_title, a.cover_path AS album_cover_path, ar.name AS artist_name, a.id AS album_id
        FROM tracks t
        JOIN albums a ON t.album_id = a.id
@@ -369,6 +411,7 @@ app.patch('/api/tracks/:id', (req, res) => {
     trackNumber: updated.track_number,
     albumId: newAlbumId,
     albumTitle,
+    playCount: updated.play_count,
     artistName:
       typeof body.artistName === 'string' && body.artistName.trim()
         ? body.artistName.trim()

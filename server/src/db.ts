@@ -17,6 +17,7 @@ export type TrackRow = {
   duration_seconds: number | null
   track_number: number | null
   created_at: string
+  play_count: number
 }
 
 let db: DatabaseSync
@@ -59,7 +60,8 @@ export function initDb(): void {
       title TEXT NOT NULL,
       duration_seconds REAL,
       track_number INTEGER,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      play_count INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album_id);
 
@@ -69,12 +71,20 @@ export function initDb(): void {
     );
   `)
   migrateArtistsImageColumn()
+  migrateTracksPlayCountColumn()
 }
 
 function migrateArtistsImageColumn(): void {
   const cols = db.prepare('PRAGMA table_info(artists)').all() as { name: string }[]
   if (!cols.some((c) => c.name === 'image_path')) {
     db.exec('ALTER TABLE artists ADD COLUMN image_path TEXT')
+  }
+}
+
+function migrateTracksPlayCountColumn(): void {
+  const cols = db.prepare('PRAGMA table_info(tracks)').all() as { name: string }[]
+  if (!cols.some((c) => c.name === 'play_count')) {
+    db.exec('ALTER TABLE tracks ADD COLUMN play_count INTEGER NOT NULL DEFAULT 0')
   }
 }
 
@@ -186,6 +196,10 @@ export function updateAlbumCoverPath(albumId: number, relativeFilename: string):
 
 export function updateArtistImagePath(artistId: number, relativeFilename: string): void {
   db.prepare('UPDATE artists SET image_path = ? WHERE id = ?').run(relativeFilename, artistId)
+}
+
+export function incrementTrackPlayCount(trackId: number): void {
+  db.prepare('UPDATE tracks SET play_count = play_count + 1 WHERE id = ?').run(trackId)
 }
 
 const KEY_MUSIC_LIBRARY = 'music_library_path'

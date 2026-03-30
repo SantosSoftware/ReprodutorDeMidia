@@ -7,6 +7,7 @@ import { ArtistsPage } from './pages/ArtistsPage'
 import { LibraryPage } from './pages/LibraryPage'
 import { PlaylistsPage } from './pages/PlaylistsPage'
 import { SongsPage } from './pages/SongsPage'
+import { TopTracksPage } from './pages/TopTracksPage'
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
           <Route path="artists" element={<ArtistsPage />} />
           <Route path="artist/:id" element={<ArtistPage />} />
           <Route path="playlists" element={<PlaylistsPage />} />
+          <Route path="playlists/top-50" element={<TopTracksPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
