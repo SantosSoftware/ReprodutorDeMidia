@@ -5,12 +5,18 @@ export function formatDuration(seconds: number | null | undefined): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-/** Formata datetime vindo do SQLite (`YYYY-MM-DD HH:MM:SS`) para exibição local. */
+/**
+ * Formata datetime vindo do SQLite para a hora local do sistema.
+ * O SQLite usa `datetime('now')` em UTC sem sufixo; sem `Z`, o `Date` do JS
+ * interpretava mal — tratamos como UTC e convertemos para local.
+ */
 export function formatPlayedAt(sqliteDatetime: string): string {
-  const normalized = sqliteDatetime.includes('T') ? sqliteDatetime : sqliteDatetime.replace(' ', 'T')
-  const d = new Date(normalized)
+  const trimmed = sqliteDatetime.trim()
+  const normalized = trimmed.includes('T') ? trimmed : trimmed.replace(' ', 'T')
+  const hasTz = /Z$|[+-]\d{2}:?\d{2}$/.test(normalized)
+  const d = hasTz ? new Date(normalized) : new Date(`${normalized}Z`)
   if (Number.isNaN(d.getTime())) return sqliteDatetime
-  return new Intl.DateTimeFormat('pt-PT', {
+  return new Intl.DateTimeFormat(undefined, {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',

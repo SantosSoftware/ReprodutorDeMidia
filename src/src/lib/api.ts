@@ -80,6 +80,32 @@ export async function fetchTopTracks(limit = 50): Promise<ApiTrack[]> {
   return r.json()
 }
 
+export type StatArtistRow = {
+  id: number
+  name: string
+  playCount: number
+  imageUrl: string | null
+}
+export type StatAlbumRow = {
+  id: number
+  title: string
+  artistName: string
+  playCount: number
+  coverUrl: string | null
+}
+
+export async function fetchStatsTopArtists(limit = 15): Promise<StatArtistRow[]> {
+  const r = await fetch(`${API}/api/stats/top-artists?limit=${limit}`)
+  if (!r.ok) throw new Error('Não foi possível carregar estatísticas de artistas')
+  return r.json()
+}
+
+export async function fetchStatsTopAlbums(limit = 15): Promise<StatAlbumRow[]> {
+  const r = await fetch(`${API}/api/stats/top-albums?limit=${limit}`)
+  if (!r.ok) throw new Error('Não foi possível carregar estatísticas de álbuns')
+  return r.json()
+}
+
 /** Últimas faixas reproduzidas, da mais recente para a mais antiga (playlist automática). */
 export async function fetchRecentTracks(limit = 50): Promise<ApiTrack[]> {
   const r = await fetch(`${API}/api/tracks/recent?limit=${limit}`)

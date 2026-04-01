@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, dialog, Menu } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -73,6 +73,23 @@ function createWindow() {
     },
   })
   if (isDev) {
+    mainWindow.webContents.on(
+      'did-fail-load',
+      (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+        if (isMainFrame === false) return
+        if (!validatedURL.startsWith('http://localhost:5173')) return
+        void dialog.showMessageBox(mainWindow ?? undefined, {
+          type: 'error',
+          title: 'Auralis',
+          message: 'Não foi possível carregar a interface de desenvolvimento.',
+          detail:
+            `Erro ${errorCode}: ${errorDescription}\n\n` +
+            'O Electron precisa do Vite em http://localhost:5173 (e do API em 3001).\n\n' +
+            'Na raiz do projeto use:\n  npm run electron\n\n' +
+            '(Não execute só "electron ." sem o servidor e o Vite a correr.)',
+        })
+      },
+    )
     mainWindow.loadURL(VITE_URL)
     mainWindow.webContents.openDevTools({ mode: 'detach' })
   } else {
@@ -95,6 +112,7 @@ if (!gotLock) {
   })
 
   app.whenReady().then(async () => {
+    Menu.setApplicationMenu(null)
     if (!isDev) {
       await loadBackend()
     }

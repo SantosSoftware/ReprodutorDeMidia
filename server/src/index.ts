@@ -316,6 +316,71 @@ app.get('/api/tracks/top', (req, res) => {
   res.json(rows.map(formatTrackRow))
 })
 
+function parseStatsLimit(req: express.Request): number {
+  const raw = req.query.limit
+  const n = raw != null && raw !== '' ? Number(raw) : 15
+  return Number.isNaN(n) ? 15 : Math.min(50, Math.max(1, Math.floor(n)))
+}
+
+/** Artistas com mais reproduções (soma das faixas). */
+app.get('/api/stats/top-artists', (req, res) => {
+  const limit = parseStatsLimit(req)
+  const db = getDb()
+  const rows = db
+    .prepare(
+      `SELECT ar.id, ar.name, ar.image_path, SUM(t.play_count) AS total_plays
+       FROM artists ar
+       JOIN albums a ON a.artist_id = ar.id
+       JOIN tracks t ON t.album_id = a.id
+       GROUP BY ar.id, ar.name, ar.image_path
+       HAVING SUM(t.play_count) > 0
+       ORDER BY total_plays DESC, ar.name COLLATE NOCASE
+       LIMIT ?`,
+    )
+    .all(limit) as { id: number; name: string; image_path: string | null; total_plays: number }[]
+  res.json(
+    rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      playCount: r.total_plays,
+      imageUrl: r.image_path ? `/api/covers/${encodeURIComponent(r.image_path)}` : null,
+    })),
+  )
+})
+
+/** Álbuns com mais reproduções (soma das faixas). */
+app.get('/api/stats/top-albums', (req, res) => {
+  const limit = parseStatsLimit(req)
+  const db = getDb()
+  const rows = db
+    .prepare(
+      `SELECT a.id, a.title, a.cover_path, ar.name AS artist_name, SUM(t.play_count) AS total_plays
+       FROM albums a
+       JOIN artists ar ON a.artist_id = ar.id
+       JOIN tracks t ON t.album_id = a.id
+       GROUP BY a.id, a.title, a.cover_path, ar.name
+       HAVING SUM(t.play_count) > 0
+       ORDER BY total_plays DESC, a.title COLLATE NOCASE
+       LIMIT ?`,
+    )
+    .all(limit) as {
+    id: number
+    title: string
+    cover_path: string | null
+    artist_name: string
+    total_plays: number
+  }[]
+  res.json(
+    rows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      artistName: r.artist_name,
+      playCount: r.total_plays,
+      coverUrl: r.cover_path ? `/api/covers/${encodeURIComponent(r.cover_path)}` : null,
+    })),
+  )
+})
+
 app.get('/api/tracks/recent', (req, res) => {
   const raw = req.query.limit
   const limit = raw != null && raw !== '' ? Math.min(100, Math.max(1, Number(raw))) : 50

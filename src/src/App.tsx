@@ -9,6 +9,7 @@ import { PlaylistsPage } from './pages/PlaylistsPage'
 import { SongsPage } from './pages/SongsPage'
 import { RecentTracksPage } from './pages/RecentTracksPage'
 import { TopTracksPage } from './pages/TopTracksPage'
+import { StatisticsPage } from './pages/StatisticsPage'
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="playlists" element={<PlaylistsPage />} />
           <Route path="playlists/top-50" element={<TopTracksPage />} />
           <Route path="playlists/recent" element={<RecentTracksPage />} />
+          <Route path="statistics" element={<StatisticsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
