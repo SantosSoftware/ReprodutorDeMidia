@@ -845,8 +845,9 @@ app.get('/api/artists', (_req, res) => {
 })
 
 const clientDist = process.env.CLIENT_DIST?.trim()
-if (process.env.SERVE_SPA === '1' && clientDist) {
-  app.use(express.static(clientDist))
+const clientDistAbs = clientDist ? path.resolve(clientDist) : ''
+if (process.env.SERVE_SPA === '1' && clientDistAbs) {
+  app.use(express.static(clientDistAbs))
   app.use((req, res, next) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       next()
@@ -856,7 +857,7 @@ if (process.env.SERVE_SPA === '1' && clientDist) {
       next()
       return
     }
-    res.sendFile(path.join(clientDist, 'index.html'))
+    res.sendFile(path.join(clientDistAbs, 'index.html'))
   })
 }
 
@@ -865,8 +866,8 @@ export const serverReady = new Promise<void>((resolve) => {
   resolveReady = resolve
 })
 
-const server = app.listen(PORT, () => {
-  console.log(`API em http://localhost:${PORT}`)
+const server = app.listen(PORT, '127.0.0.1', () => {
+  console.log(`API em http://127.0.0.1:${PORT}`)
   resolveReady()
 })
 

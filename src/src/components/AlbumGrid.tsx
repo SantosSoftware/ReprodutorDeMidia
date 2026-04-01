@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { fetchAlbums, fetchAlbumsByArtist, type ApiAlbum } from '../lib/api'
 
-const ARTIST_ALBUM_SORT_KEY = 'mediaPlayer.artistAlbumSort'
+const ARTIST_ALBUM_SORT_KEY = 'auralis.artistAlbumSort'
 
 export type ArtistAlbumSort = 'year' | 'title'
 

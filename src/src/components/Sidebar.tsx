@@ -12,7 +12,7 @@ export function Sidebar() {
   return (
     <aside className="flex w-[240px] shrink-0 flex-col border-r border-white/10 bg-[#141414]/90 backdrop-blur-md">
       <div className="border-b border-white/10 px-4 py-5">
-        <h1 className="text-base font-semibold tracking-tight text-white">Media Player</h1>
+        <h1 className="text-base font-semibold tracking-tight text-white">Auralis</h1>
         <p className="mt-0.5 text-xs text-gray-500">Biblioteca local</p>
       </div>
       <nav className="flex flex-col gap-0.5 p-3">

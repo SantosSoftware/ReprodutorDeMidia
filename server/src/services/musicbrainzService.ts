@@ -23,7 +23,7 @@ const MB_BASE = 'https://musicbrainz.org/ws/2/'
 const CAA_RELEASE = 'https://coverartarchive.org/release/'
 
 const USER_AGENT =
-  process.env.MUSICBRAINZ_USER_AGENT?.trim() || 'MyMediaPlayer/1.0 (your@email.com)'
+  process.env.MUSICBRAINZ_USER_AGENT?.trim() || 'Auralis/1.0 (your@email.com)'
 
 const MB_MIN_INTERVAL_MS = 1000
 let mbLastRequestAt = 0
