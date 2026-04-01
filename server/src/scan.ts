@@ -14,6 +14,7 @@ import {
   upsertTrack,
 } from './db.js'
 import { COVERS_DIR } from './paths.js'
+import { enrichAlbumMetadata } from './services/musicbrainzService.js'
 
 const AUDIO_EXT = new Set([
   '.mp3',
@@ -104,6 +105,7 @@ export async function syncMusicLibrary(rootPath: string): Promise<SyncResult> {
   let tracksAdded = 0
   let tracksUpdated = 0
   const errors: string[] = []
+  const albumsToEnrich = new Set<number>()
 
   for (const filePath of files) {
     try {
@@ -152,6 +154,7 @@ export async function syncMusicLibrary(rootPath: string): Promise<SyncResult> {
       }
 
       upsertTrack(filePath, albumId, title, duration, trackNo, discNo)
+      albumsToEnrich.add(albumId)
       if (existed) tracksUpdated += 1
       else tracksAdded += 1
     } catch (err) {
@@ -175,6 +178,18 @@ export async function syncMusicLibrary(rootPath: string): Promise<SyncResult> {
   }
 
   cleanupEmptyAlbumsAndArtists()
+
+  for (const aid of albumsToEnrich) {
+    const exists = db.prepare('SELECT 1 AS o FROM albums WHERE id = ?').get(aid) as
+      | { o: number }
+      | undefined
+    if (!exists) continue
+    try {
+      await enrichAlbumMetadata(aid)
+    } catch {
+      /* falha de rede / API — não bloqueia o scan */
+    }
+  }
 
   return {
     filesScanned: files.length,

@@ -4,5 +4,6 @@ dist/
 .DS_Store
 server/data/
 server/dist/
+server/.env
 src/dist/
 release/

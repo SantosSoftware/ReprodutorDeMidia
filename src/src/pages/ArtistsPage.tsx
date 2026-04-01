@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { MusicBrainzArtistImageModal } from '../components/MusicBrainzArtistImageModal'
 import { fetchArtists, uploadArtistImage, type ApiArtist } from '../lib/api'
 
 export function ArtistsPage() {
   const [rows, setRows] = useState<ApiArtist[]>([])
   const [error, setError] = useState<string | null>(null)
   const [uploadingId, setUploadingId] = useState<number | null>(null)
+  const [mbModal, setMbModal] = useState<{ id: number; name: string } | null>(null)
 
   const load = useCallback(async () => {
     setError(null)
@@ -43,9 +45,18 @@ export function ArtistsPage() {
     <div>
       <h2 className="mb-2 text-2xl font-semibold tracking-tight text-white">Artistas</h2>
       <p className="mb-6 max-w-xl text-sm text-gray-500">
-        Toque no nome ou na imagem para ver os álbuns. Use &quot;Carregar imagem&quot; para definir
-        a foto do artista (formato quadrado, como no Spotify).
+        Toque no nome ou na imagem para ver os álbuns. Pode carregar um ficheiro ou usar
+        &quot;MusicBrainz&quot; para escolher o artista na base MusicBrainz e obter uma foto
+        (Fanart.tv / TheAudioDB).
       </p>
+
+      <MusicBrainzArtistImageModal
+        open={mbModal != null}
+        artistId={mbModal?.id ?? 0}
+        artistName={mbModal?.name ?? ''}
+        onClose={() => setMbModal(null)}
+        onSuccess={() => void load()}
+      />
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
         {rows.map((a) => (
@@ -74,19 +85,33 @@ export function ArtistsPage() {
             <p className="mt-0.5 text-center text-xs text-gray-500">
               {a.albumCount} {a.albumCount === 1 ? 'álbum' : 'álbuns'}
             </p>
-            <label className="mt-3 block cursor-pointer text-center">
-              <span className="text-xs font-medium text-[#60cdff] hover:underline">
-                {uploadingId === a.id ? 'A enviar…' : 'Carregar imagem'}
-              </span>
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp,image/gif"
-                className="sr-only"
+            <div className="mt-3 flex flex-col gap-1.5">
+              <label className="block cursor-pointer text-center">
+                <span className="text-xs font-medium text-[#60cdff] hover:underline">
+                  {uploadingId === a.id ? 'A enviar…' : 'Carregar imagem'}
+                </span>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  className="sr-only"
+                  disabled={uploadingId != null}
+                  onChange={(e) => void onImageChange(a.id, e)}
+                  onClick={(ev) => ev.stopPropagation()}
+                />
+              </label>
+              <button
+                type="button"
+                className="text-center text-xs font-medium text-gray-400 transition hover:text-[#60cdff]"
                 disabled={uploadingId != null}
-                onChange={(e) => void onImageChange(a.id, e)}
-                onClick={(ev) => ev.stopPropagation()}
-              />
-            </label>
+                onClick={(ev) => {
+                  ev.preventDefault()
+                  ev.stopPropagation()
+                  setMbModal({ id: a.id, name: a.name })
+                }}
+              >
+                MusicBrainz…
+              </button>
+            </div>
           </div>
         ))}
       </div>

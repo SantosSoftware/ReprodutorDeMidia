@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { AlbumGrid } from '../components/AlbumGrid'
+import { MusicBrainzArtistImageModal } from '../components/MusicBrainzArtistImageModal'
 import { fetchArtist, fetchTracksByArtist, uploadArtistImage } from '../lib/api'
 import type { ApiArtist } from '../lib/api'
 import { shuffleInPlace } from '../lib/shuffle'
@@ -15,6 +16,7 @@ export function ArtistPage() {
   const [uploading, setUploading] = useState(false)
   const [playBusy, setPlayBusy] = useState(false)
   const [hint, setHint] = useState<string | null>(null)
+  const [mbModalOpen, setMbModalOpen] = useState(false)
 
   const playQueueFromApi = usePlaybackStore((s) => s.playQueueFromApi)
 
@@ -123,6 +125,14 @@ export function ArtistPage() {
         </p>
       )}
 
+      <MusicBrainzArtistImageModal
+        open={mbModalOpen}
+        artistId={artist.id}
+        artistName={artist.name}
+        onClose={() => setMbModalOpen(false)}
+        onSuccess={() => void load()}
+      />
+
       <header className="mb-10 flex flex-col gap-8 sm:flex-row sm:items-end">
         <div className="relative mx-auto shrink-0 sm:mx-0">
           <div className="relative aspect-square w-[min(100%,280px)] overflow-hidden rounded-2xl bg-[#2d2d2d] shadow-2xl ring-1 ring-white/10 sm:w-56">
@@ -163,16 +173,26 @@ export function ArtistPage() {
               </div>
             </div>
           </div>
-          <label className="mt-3 block">
-            <span className="sr-only">Imagem do artista</span>
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp,image/gif"
-              onChange={(e) => void onImageFile(e)}
+          <div className="mt-3 flex flex-col gap-2">
+            <label className="block">
+              <span className="sr-only">Imagem do artista</span>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                onChange={(e) => void onImageFile(e)}
+                disabled={uploading}
+                className="w-full cursor-pointer text-xs text-gray-400 file:mr-2 file:cursor-pointer file:rounded-lg file:border-0 file:bg-white/10 file:px-3 file:py-2 file:text-xs file:text-white"
+              />
+            </label>
+            <button
+              type="button"
               disabled={uploading}
-              className="w-full cursor-pointer text-xs text-gray-400 file:mr-2 file:cursor-pointer file:rounded-lg file:border-0 file:bg-white/10 file:px-3 file:py-2 file:text-xs file:text-white"
-            />
-          </label>
+              onClick={() => setMbModalOpen(true)}
+              className="w-full rounded-lg border border-white/10 bg-white/5 py-2 text-center text-xs font-medium text-[#60cdff] transition hover:bg-white/10 disabled:opacity-50"
+            >
+              MusicBrainz — escolher artista e obter imagem
+            </button>
+          </div>
           {uploading && (
             <p className="mt-1 text-xs text-gray-500">A enviar imagem…</p>
           )}

@@ -4,13 +4,23 @@ import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { COVERS_DIR, DATA_DIR, DB_PATH } from './paths.js'
 
-export type ArtistRow = { id: number; name: string; image_path: string | null }
+export type ArtistRow = {
+  id: number
+  name: string
+  image_path: string | null
+  /** MusicBrainz artist id (cache). */
+  mbid: string | null
+}
 export type AlbumRow = {
   id: number
   artist_id: number
   title: string
   cover_path: string | null
   year: number | null
+  /** MusicBrainz release id (cache). */
+  mbid: string | null
+  /** 'needs_metadata' quando não foi possível obter capa/metadados remotos. */
+  metadata_status: string | null
 }
 export type TrackRow = {
   id: number
@@ -83,6 +93,8 @@ export function initDb(): void {
   migrateTracksDiscNumberColumn()
   migratePlayIdentityKeyColumn()
   migratePlayHistoryTable()
+  migrateAlbumMbidAndMetadataStatus()
+  migrateArtistMbidColumn()
 }
 
 function migrateArtistsImageColumn(): void {
@@ -114,6 +126,23 @@ function migrateTracksDiscNumberColumn(): void {
 }
 
 export const PLAY_HISTORY_MAX = 50
+
+function migrateArtistMbidColumn(): void {
+  const cols = db.prepare('PRAGMA table_info(artists)').all() as { name: string }[]
+  if (!cols.some((c) => c.name === 'mbid')) {
+    db.exec('ALTER TABLE artists ADD COLUMN mbid TEXT')
+  }
+}
+
+function migrateAlbumMbidAndMetadataStatus(): void {
+  const cols = db.prepare('PRAGMA table_info(albums)').all() as { name: string }[]
+  if (!cols.some((c) => c.name === 'mbid')) {
+    db.exec('ALTER TABLE albums ADD COLUMN mbid TEXT')
+  }
+  if (!cols.some((c) => c.name === 'metadata_status')) {
+    db.exec('ALTER TABLE albums ADD COLUMN metadata_status TEXT')
+  }
+}
 
 function migratePlayHistoryTable(): void {
   const exists = db
@@ -435,8 +464,23 @@ export function updateAlbumCoverPath(albumId: number, relativeFilename: string):
   db.prepare('UPDATE albums SET cover_path = ? WHERE id = ?').run(relativeFilename, albumId)
 }
 
+export function updateAlbumMbid(albumId: number, mbid: string | null): void {
+  db.prepare('UPDATE albums SET mbid = ? WHERE id = ?').run(mbid, albumId)
+}
+
+export function updateAlbumMetadataStatus(
+  albumId: number,
+  status: 'needs_metadata' | null,
+): void {
+  db.prepare('UPDATE albums SET metadata_status = ? WHERE id = ?').run(status, albumId)
+}
+
 export function updateArtistImagePath(artistId: number, relativeFilename: string): void {
   db.prepare('UPDATE artists SET image_path = ? WHERE id = ?').run(relativeFilename, artistId)
+}
+
+export function updateArtistMbid(artistId: number, mbid: string | null): void {
+  db.prepare('UPDATE artists SET mbid = ? WHERE id = ?').run(mbid, artistId)
 }
 
 export function incrementTrackPlayCount(trackId: number): void {

@@ -1,3 +1,4 @@
+import './loadEnv.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import cors from 'cors'
@@ -26,6 +27,11 @@ import {
 } from './db.js'
 import { COVERS_DIR } from './paths.js'
 import { syncFromSavedMusicLibrary, syncMusicLibrary } from './scan.js'
+import {
+  applyArtistImageFromMusicBrainz,
+  enrichAlbumMetadata,
+  searchMbArtists,
+} from './services/musicbrainzService.js'
 
 initDb()
 const app = express()
@@ -80,6 +86,20 @@ app.post('/api/library/sync', async (_req, res) => {
 })
 
 /** Importação explícita por caminho (também grava a pasta na biblioteca). */
+app.get('/api/musicbrainz/artists', async (req, res) => {
+  const raw = req.query.q
+  if (typeof raw !== 'string' || !raw.trim()) {
+    res.status(400).json({ error: 'Parâmetro q é obrigatório' })
+    return
+  }
+  try {
+    const artists = await searchMbArtists(raw.trim())
+    res.json(artists)
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) })
+  }
+})
+
 app.post('/api/library/scan', async (req, res) => {
   const rootPath = req.body?.rootPath
   if (typeof rootPath !== 'string' || !rootPath.trim()) {
@@ -103,7 +123,7 @@ app.get('/api/albums', (_req, res) => {
   const db = getDb()
   const rows = db
     .prepare(
-      `SELECT a.id, a.title, a.year, a.cover_path, ar.name AS artist_name, ar.id AS artist_id,
+      `SELECT a.id, a.title, a.year, a.cover_path, a.mbid, a.metadata_status, ar.name AS artist_name, ar.id AS artist_id,
               (SELECT COUNT(*) FROM tracks t WHERE t.album_id = a.id) AS track_count
        FROM albums a
        JOIN artists ar ON a.artist_id = ar.id
@@ -114,6 +134,8 @@ app.get('/api/albums', (_req, res) => {
     title: string
     year: number | null
     cover_path: string | null
+    mbid: string | null
+    metadata_status: string | null
     artist_name: string
     artist_id: number
     track_count: number
@@ -127,6 +149,8 @@ app.get('/api/albums', (_req, res) => {
     artistName: r.artist_name,
     trackCount: r.track_count,
     coverUrl: r.cover_path ? `/api/covers/${encodeURIComponent(r.cover_path)}` : null,
+    mbid: r.mbid,
+    metadataStatus: r.metadata_status,
   }))
   res.json(out)
 })
@@ -140,7 +164,7 @@ app.get('/api/albums/:id', (req, res) => {
   const db = getDb()
   const row = db
     .prepare(
-      `SELECT a.id, a.title, a.year, a.cover_path, ar.name AS artist_name, ar.id AS artist_id,
+      `SELECT a.id, a.title, a.year, a.cover_path, a.mbid, a.metadata_status, ar.name AS artist_name, ar.id AS artist_id,
               (SELECT COUNT(*) FROM tracks t WHERE t.album_id = a.id) AS track_count
        FROM albums a
        JOIN artists ar ON a.artist_id = ar.id
@@ -152,6 +176,8 @@ app.get('/api/albums/:id', (req, res) => {
         title: string
         year: number | null
         cover_path: string | null
+        mbid: string | null
+        metadata_status: string | null
         artist_name: string
         artist_id: number
         track_count: number
@@ -169,6 +195,8 @@ app.get('/api/albums/:id', (req, res) => {
     artistName: row.artist_name,
     trackCount: row.track_count,
     coverUrl: row.cover_path ? `/api/covers/${encodeURIComponent(row.cover_path)}` : null,
+    mbid: row.mbid,
+    metadataStatus: row.metadata_status,
   })
 })
 
@@ -507,7 +535,7 @@ app.patch('/api/tracks/:id', (req, res) => {
   })
 })
 
-app.patch('/api/albums/:id', (req, res) => {
+app.patch('/api/albums/:id', async (req, res) => {
   const id = Number(req.params.id)
   if (Number.isNaN(id)) {
     res.status(400).json({ error: 'id inválido' })
@@ -552,10 +580,15 @@ app.patch('/api/albums/:id', (req, res) => {
   }
   if (touched) {
     refreshPlayIdentityKeysForAlbum(id)
+    try {
+      await enrichAlbumMetadata(id)
+    } catch {
+      /* falha de rede / API */
+    }
   }
   const row = db
     .prepare(
-      `SELECT a.id, a.title, a.year, a.cover_path, ar.name AS artist_name, ar.id AS artist_id,
+      `SELECT a.id, a.title, a.year, a.cover_path, a.mbid, a.metadata_status, ar.name AS artist_name, ar.id AS artist_id,
               (SELECT COUNT(*) FROM tracks t WHERE t.album_id = a.id) AS track_count
        FROM albums a
        JOIN artists ar ON a.artist_id = ar.id
@@ -567,6 +600,8 @@ app.patch('/api/albums/:id', (req, res) => {
         title: string
         year: number | null
         cover_path: string | null
+        mbid: string | null
+        metadata_status: string | null
         artist_name: string
         artist_id: number
         track_count: number
@@ -584,6 +619,8 @@ app.patch('/api/albums/:id', (req, res) => {
     artistName: row.artist_name,
     trackCount: row.track_count,
     coverUrl: row.cover_path ? `/api/covers/${encodeURIComponent(row.cover_path)}` : null,
+    mbid: row.mbid,
+    metadataStatus: row.metadata_status,
   })
 })
 
@@ -660,7 +697,7 @@ app.get('/api/artists/:id/albums', (req, res) => {
   }
   const rows = db
     .prepare(
-      `SELECT a.id, a.title, a.year, a.cover_path, ar.name AS artist_name, ar.id AS artist_id,
+      `SELECT a.id, a.title, a.year, a.cover_path, a.mbid, a.metadata_status, ar.name AS artist_name, ar.id AS artist_id,
               (SELECT COUNT(*) FROM tracks t WHERE t.album_id = a.id) AS track_count
        FROM albums a
        JOIN artists ar ON a.artist_id = ar.id
@@ -672,6 +709,8 @@ app.get('/api/artists/:id/albums', (req, res) => {
     title: string
     year: number | null
     cover_path: string | null
+    mbid: string | null
+    metadata_status: string | null
     artist_name: string
     artist_id: number
     track_count: number
@@ -684,6 +723,8 @@ app.get('/api/artists/:id/albums', (req, res) => {
     artistName: r.artist_name,
     trackCount: r.track_count,
     coverUrl: r.cover_path ? `/api/covers/${encodeURIComponent(r.cover_path)}` : null,
+    mbid: r.mbid,
+    metadataStatus: r.metadata_status,
   }))
   res.json(out)
 })
@@ -697,13 +738,13 @@ app.get('/api/artists/:id', (req, res) => {
   const db = getDb()
   const row = db
     .prepare(
-      `SELECT ar.id, ar.name, ar.image_path,
+      `SELECT ar.id, ar.name, ar.image_path, ar.mbid,
               (SELECT COUNT(DISTINCT a.id) FROM albums a WHERE a.artist_id = ar.id) AS album_count
        FROM artists ar
        WHERE ar.id = ?`,
     )
     .get(id) as
-    | { id: number; name: string; image_path: string | null; album_count: number }
+    | { id: number; name: string; image_path: string | null; mbid: string | null; album_count: number }
     | undefined
   if (!row) {
     res.status(404).json({ error: 'Artista não encontrado' })
@@ -714,7 +755,43 @@ app.get('/api/artists/:id', (req, res) => {
     name: row.name,
     albumCount: row.album_count,
     imageUrl: row.image_path ? `/api/covers/${encodeURIComponent(row.image_path)}` : null,
+    mbid: row.mbid ?? null,
   })
+})
+
+app.post('/api/artists/:id/image/musicbrainz', async (req, res) => {
+  const id = Number(req.params.id)
+  if (Number.isNaN(id)) {
+    res.status(400).json({ error: 'id inválido' })
+    return
+  }
+  const body = req.body as { mbid?: string; name?: string }
+  const mbid = typeof body.mbid === 'string' ? body.mbid.trim() : ''
+  const nameFromBody = typeof body.name === 'string' ? body.name.trim() : ''
+  if (!mbid) {
+    res.status(400).json({ error: 'mbid é obrigatório' })
+    return
+  }
+  const db = getDb()
+  const artist = db.prepare('SELECT id, name FROM artists WHERE id = ?').get(id) as
+    | { id: number; name: string }
+    | undefined
+  if (!artist) {
+    res.status(404).json({ error: 'Artista não encontrado' })
+    return
+  }
+  const displayName = nameFromBody || artist.name
+  try {
+    await applyArtistImageFromMusicBrainz(id, mbid, displayName)
+    const row = db.prepare('SELECT image_path FROM artists WHERE id = ?').get(id) as
+      | { image_path: string | null }
+      | undefined
+    res.json({
+      imageUrl: row?.image_path ? `/api/covers/${encodeURIComponent(row.image_path)}` : null,
+    })
+  } catch (e) {
+    res.status(502).json({ error: e instanceof Error ? e.message : String(e) })
+  }
 })
 
 app.post('/api/artists/:id/image', uploadArtistImage.single('image'), (req, res) => {
@@ -744,18 +821,25 @@ app.get('/api/artists', (_req, res) => {
   const db = getDb()
   const rows = db
     .prepare(
-      `SELECT ar.id, ar.name, ar.image_path,
+      `SELECT ar.id, ar.name, ar.image_path, ar.mbid,
               (SELECT COUNT(DISTINCT a.id) FROM albums a WHERE a.artist_id = ar.id) AS album_count
        FROM artists ar
        ORDER BY ar.name COLLATE NOCASE`,
     )
-    .all() as { id: number; name: string; image_path: string | null; album_count: number }[]
+    .all() as {
+    id: number
+    name: string
+    image_path: string | null
+    mbid: string | null
+    album_count: number
+  }[]
   res.json(
     rows.map((r) => ({
       id: r.id,
       name: r.name,
       albumCount: r.album_count,
       imageUrl: r.image_path ? `/api/covers/${encodeURIComponent(r.image_path)}` : null,
+      mbid: r.mbid,
     })),
   )
 })

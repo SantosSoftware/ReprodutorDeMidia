@@ -38,6 +38,14 @@ export type ApiArtist = {
   name: string
   albumCount: number
   imageUrl: string | null
+  /** MusicBrainz artist id, se já associado. */
+  mbid?: string | null
+}
+
+export type MbArtistHit = {
+  mbid: string
+  name: string
+  disambiguation?: string
 }
 
 export async function fetchAlbums(): Promise<ApiAlbum[]> {
@@ -115,6 +123,32 @@ export async function uploadArtistImage(
     body: fd,
   })
   if (!r.ok) throw new Error('Upload da imagem falhou')
+  return r.json()
+}
+
+export async function searchMusicBrainzArtists(q: string): Promise<MbArtistHit[]> {
+  const r = await fetch(`${API}/api/musicbrainz/artists?q=${encodeURIComponent(q)}`)
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}))
+    throw new Error((err as { error?: string }).error ?? 'Pesquisa MusicBrainz falhou')
+  }
+  return r.json()
+}
+
+export async function applyArtistImageFromMusicBrainz(
+  artistId: number,
+  mbid: string,
+  name: string,
+): Promise<{ imageUrl: string | null }> {
+  const r = await fetch(`${API}/api/artists/${artistId}/image/musicbrainz`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mbid, name }),
+  })
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}))
+    throw new Error((err as { error?: string }).error ?? 'Não foi possível obter a imagem')
+  }
   return r.json()
 }
 
