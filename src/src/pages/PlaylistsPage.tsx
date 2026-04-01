@@ -17,6 +17,15 @@ export function PlaylistsPage() {
             <span className="text-xs text-gray-500">Automática</span>
           </Link>
         </li>
+        <li>
+          <Link
+            to="/playlists/recent"
+            className="flex items-center justify-between px-4 py-4 text-sm text-white transition hover:bg-white/5"
+          >
+            <span className="font-medium">Últimas reproduções</span>
+            <span className="text-xs text-gray-500">Automática · até 50</span>
+          </Link>
+        </li>
       </ul>
     </div>
   )

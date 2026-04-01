@@ -189,7 +189,6 @@ export function ArtistPage() {
         </div>
       </header>
 
-      <h2 className="mb-4 text-lg font-medium text-gray-300">Álbuns</h2>
       <AlbumGrid artistId={artist.id} />
     </div>
   )

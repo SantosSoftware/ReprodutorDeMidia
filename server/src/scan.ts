@@ -10,6 +10,7 @@ import {
   getMusicLibraryPath,
   registerLibraryRoot,
   setAlbumCoverIfEmpty,
+  updateAlbumYear,
   upsertTrack,
 } from './db.js'
 import { COVERS_DIR } from './paths.js'
@@ -113,6 +114,9 @@ export async function syncMusicLibrary(rootPath: string): Promise<SyncResult> {
       const meta = await parseFile(filePath)
       const duration = meta.format.duration ?? null
       const trackNo = meta.common.track?.no ?? null
+      const rawDisc = meta.common.disk?.no
+      const discNo =
+        rawDisc != null && Number.isFinite(Number(rawDisc)) ? Math.trunc(Number(rawDisc)) : null
       const title =
         meta.common.title?.trim() ||
         path.basename(filePath, path.extname(filePath))
@@ -122,6 +126,17 @@ export async function syncMusicLibrary(rootPath: string): Promise<SyncResult> {
 
       const artistId = findOrCreateArtist(artistName)
       const albumId = findOrCreateAlbum(artistId, albumName)
+
+      const rawYear = meta.common.year
+      if (rawYear != null) {
+        const y =
+          typeof rawYear === 'number'
+            ? rawYear
+            : Number(String(rawYear).replace(/\D/g, '').slice(0, 4))
+        if (Number.isFinite(y) && y >= 1000 && y <= 9999) {
+          updateAlbumYear(albumId, Math.trunc(y))
+        }
+      }
 
       const pictures = meta.common.picture
       if (pictures?.length) {
@@ -136,7 +151,7 @@ export async function syncMusicLibrary(rootPath: string): Promise<SyncResult> {
         setAlbumCoverIfEmpty(albumId, fname)
       }
 
-      upsertTrack(filePath, albumId, title, duration, trackNo)
+      upsertTrack(filePath, albumId, title, duration, trackNo, discNo)
       if (existed) tracksUpdated += 1
       else tracksAdded += 1
     } catch (err) {

@@ -4,4 +4,5 @@ dist/
 .DS_Store
 server/data/
 server/dist/
-client/dist/
+src/dist/
+release/

@@ -1,4 +1,6 @@
+import crypto from 'node:crypto'
 import fs from 'node:fs'
+import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { COVERS_DIR, DATA_DIR, DB_PATH } from './paths.js'
 
@@ -8,6 +10,7 @@ export type AlbumRow = {
   artist_id: number
   title: string
   cover_path: string | null
+  year: number | null
 }
 export type TrackRow = {
   id: number
@@ -16,6 +19,10 @@ export type TrackRow = {
   title: string
   duration_seconds: number | null
   track_number: number | null
+  /** Volume / disco (ex.: 1 ou 2 num álbum duplo). */
+  disc_number: number | null
+  /** Chave lógica para contagem de reproduções (independente do caminho no disco). */
+  play_identity_key: string
   created_at: string
   play_count: number
 }
@@ -72,6 +79,10 @@ export function initDb(): void {
   `)
   migrateArtistsImageColumn()
   migrateTracksPlayCountColumn()
+  migrateAlbumYearColumn()
+  migrateTracksDiscNumberColumn()
+  migratePlayIdentityKeyColumn()
+  migratePlayHistoryTable()
 }
 
 function migrateArtistsImageColumn(): void {
@@ -86,6 +97,139 @@ function migrateTracksPlayCountColumn(): void {
   if (!cols.some((c) => c.name === 'play_count')) {
     db.exec('ALTER TABLE tracks ADD COLUMN play_count INTEGER NOT NULL DEFAULT 0')
   }
+}
+
+function migrateAlbumYearColumn(): void {
+  const cols = db.prepare('PRAGMA table_info(albums)').all() as { name: string }[]
+  if (!cols.some((c) => c.name === 'year')) {
+    db.exec('ALTER TABLE albums ADD COLUMN year INTEGER')
+  }
+}
+
+function migrateTracksDiscNumberColumn(): void {
+  const cols = db.prepare('PRAGMA table_info(tracks)').all() as { name: string }[]
+  if (!cols.some((c) => c.name === 'disc_number')) {
+    db.exec('ALTER TABLE tracks ADD COLUMN disc_number INTEGER')
+  }
+}
+
+export const PLAY_HISTORY_MAX = 50
+
+function migratePlayHistoryTable(): void {
+  const exists = db
+    .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'play_history'`)
+    .get()
+  if (!exists) {
+    db.exec(`
+      CREATE TABLE play_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+        played_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX idx_play_history_played_at ON play_history(played_at);
+    `)
+  }
+}
+
+/** Regista uma reprodução na lista das últimas faixas (mantém no máximo PLAY_HISTORY_MAX entradas). */
+export function recordPlayHistory(trackId: number): void {
+  db.prepare('INSERT INTO play_history (track_id) VALUES (?)').run(trackId)
+  const row = db.prepare('SELECT COUNT(*) AS c FROM play_history').get() as { c: number }
+  if (row.c > PLAY_HISTORY_MAX) {
+    const excess = row.c - PLAY_HISTORY_MAX
+    db.prepare(
+      `DELETE FROM play_history WHERE id IN (
+        SELECT id FROM play_history ORDER BY played_at ASC, id ASC LIMIT ?
+      )`,
+    ).run(excess)
+  }
+}
+
+function migratePlayIdentityKeyColumn(): void {
+  const cols = db.prepare('PRAGMA table_info(tracks)').all() as { name: string }[]
+  if (!cols.some((c) => c.name === 'play_identity_key')) {
+    db.exec('ALTER TABLE tracks ADD COLUMN play_identity_key TEXT')
+  }
+  const pending = db
+    .prepare(
+      `SELECT COUNT(*) AS c FROM tracks WHERE play_identity_key IS NULL OR play_identity_key = ''`,
+    )
+    .get() as { c: number }
+  if (pending.c > 0) {
+    const rows = db
+      .prepare(
+        `SELECT t.id, t.title, t.track_number, t.disc_number, ar.name AS artist_name, a.title AS album_title, a.year AS album_year
+         FROM tracks t
+         JOIN albums a ON t.album_id = a.id
+         JOIN artists ar ON a.artist_id = ar.id
+         WHERE t.play_identity_key IS NULL OR t.play_identity_key = ''`,
+      )
+      .all() as {
+      id: number
+      title: string
+      track_number: number | null
+      disc_number: number | null
+      artist_name: string
+      album_title: string
+      album_year: number | null
+    }[]
+    const used = new Set<string>()
+    for (const r of rows) {
+      let key = computePlayIdentityKey(
+        r.artist_name,
+        r.album_title,
+        r.title,
+        r.album_year,
+        r.disc_number,
+        r.track_number,
+      )
+      if (used.has(key)) {
+        key = `${key}\u0000${r.id}`
+      }
+      used.add(key)
+      db.prepare('UPDATE tracks SET play_identity_key = ? WHERE id = ?').run(key, r.id)
+    }
+  }
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_play_identity ON tracks(play_identity_key)')
+}
+
+/** Identidade lógica da faixa (reproduções seguem esta chave, não o caminho do ficheiro). */
+export function computePlayIdentityKey(
+  artistName: string,
+  albumTitle: string,
+  trackTitle: string,
+  albumYear: number | null,
+  discNumber: number | null,
+  trackNumber: number | null,
+): string {
+  const a = norm(artistName).toLowerCase()
+  const al = norm(albumTitle).toLowerCase()
+  const tt = norm(trackTitle).toLowerCase()
+  const y = albumYear != null && Number.isFinite(albumYear) ? String(Math.trunc(albumYear)) : ''
+  const d = discNumber != null && discNumber >= 1 ? String(Math.trunc(discNumber)) : ''
+  const tn = trackNumber != null && trackNumber >= 1 ? String(Math.trunc(trackNumber)) : ''
+  return `${a}\u001f${al}\u001f${tt}\u001f${y}\u001f${d}\u001f${tn}`
+}
+
+function hashPathForIdentity(filePath: string): string {
+  return crypto.createHash('sha256').update(path.resolve(filePath)).digest('hex').slice(0, 24)
+}
+
+function getAlbumIdentityContext(albumId: number): {
+  artistName: string
+  albumTitle: string
+  year: number | null
+} | null {
+  const row = db
+    .prepare(
+      `SELECT ar.name AS artist_name, a.title AS album_title, a.year AS album_year
+       FROM albums a JOIN artists ar ON a.artist_id = ar.id WHERE a.id = ?`,
+    )
+    .get(albumId) as
+    | { artist_name: string; album_title: string; album_year: number | null }
+    | undefined
+  if (!row) return null
+  return { artistName: row.artist_name, albumTitle: row.album_title, year: row.album_year }
 }
 
 function norm(s: string): string {
@@ -136,24 +280,74 @@ export function upsertTrack(
   title: string,
   durationSeconds: number | null,
   trackNumber: number | null,
+  discNumber: number | null,
 ): number {
   const t = norm(title)
-  const existing = db
+  const ctx = getAlbumIdentityContext(albumId)
+  if (!ctx) {
+    throw new Error('Álbum não encontrado para identidade da faixa')
+  }
+  const identityKey = computePlayIdentityKey(
+    ctx.artistName,
+    ctx.albumTitle,
+    t,
+    ctx.year,
+    discNumber,
+    trackNumber,
+  )
+
+  const resolvedPath = path.resolve(filePath)
+  const byPath = db
     .prepare('SELECT id FROM tracks WHERE file_path = ?')
     .get(filePath) as { id: number } | undefined
-  if (existing) {
+  if (byPath) {
     db.prepare(
-      `UPDATE tracks SET album_id = ?, title = ?, duration_seconds = ?, track_number = ?
+      `UPDATE tracks SET album_id = ?, title = ?, duration_seconds = ?, track_number = ?, disc_number = ?, play_identity_key = ?
        WHERE id = ?`,
-    ).run(albumId, t, durationSeconds, trackNumber, existing.id)
-    return existing.id
+    ).run(albumId, t, durationSeconds, trackNumber, discNumber, identityKey, byPath.id)
+    return byPath.id
   }
+
+  const byIdentity = db
+    .prepare('SELECT id, file_path FROM tracks WHERE play_identity_key = ?')
+    .get(identityKey) as { id: number; file_path: string } | undefined
+  if (byIdentity) {
+    const oldResolved = path.resolve(byIdentity.file_path)
+    if (oldResolved === resolvedPath) {
+      db.prepare(
+        `UPDATE tracks SET album_id = ?, title = ?, duration_seconds = ?, track_number = ?, disc_number = ?, play_identity_key = ?
+         WHERE id = ?`,
+      ).run(albumId, t, durationSeconds, trackNumber, discNumber, identityKey, byIdentity.id)
+      return byIdentity.id
+    }
+    if (fs.existsSync(byIdentity.file_path)) {
+      let altKey = `${identityKey}\u0000${hashPathForIdentity(filePath)}`
+      while (
+        db.prepare('SELECT 1 FROM tracks WHERE play_identity_key = ?').get(altKey) != null
+      ) {
+        altKey += 'x'
+      }
+      const r = db
+        .prepare(
+          `INSERT INTO tracks (album_id, file_path, title, duration_seconds, track_number, disc_number, play_identity_key)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(albumId, filePath, t, durationSeconds, trackNumber, discNumber, altKey)
+      return lastId(r)
+    }
+    db.prepare(
+      `UPDATE tracks SET file_path = ?, album_id = ?, title = ?, duration_seconds = ?, track_number = ?, disc_number = ?, play_identity_key = ?
+       WHERE id = ?`,
+    ).run(filePath, albumId, t, durationSeconds, trackNumber, discNumber, identityKey, byIdentity.id)
+    return byIdentity.id
+  }
+
   const r = db
     .prepare(
-      `INSERT INTO tracks (album_id, file_path, title, duration_seconds, track_number)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO tracks (album_id, file_path, title, duration_seconds, track_number, disc_number, play_identity_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(albumId, filePath, t, durationSeconds, trackNumber)
+    .run(albumId, filePath, t, durationSeconds, trackNumber, discNumber, identityKey)
   return lastId(r)
 }
 
@@ -166,12 +360,14 @@ export type TrackWithRelations = TrackRow & {
   album_title: string
   artist_name: string
   album_cover_path: string | null
+  album_year: number | null
 }
 
 export function getTrackWithRelations(trackId: number): TrackWithRelations | null {
   const row = db
     .prepare(
-      `SELECT t.*, a.artist_id, a.title AS album_title, a.cover_path AS album_cover_path, ar.name AS artist_name
+      `SELECT t.*, a.artist_id, a.title AS album_title, a.cover_path AS album_cover_path,
+              a.year AS album_year, ar.name AS artist_name
        FROM tracks t
        JOIN albums a ON t.album_id = a.id
        JOIN artists ar ON a.artist_id = ar.id
@@ -188,6 +384,51 @@ export function getTrackById(trackId: number): TrackRow | null {
 
 export function updateAlbumTitle(albumId: number, title: string): void {
   db.prepare('UPDATE albums SET title = ? WHERE id = ?').run(norm(title), albumId)
+}
+
+export function updateAlbumYear(albumId: number, year: number | null): void {
+  db.prepare('UPDATE albums SET year = ? WHERE id = ?').run(year, albumId)
+}
+
+export function updateAlbumArtistId(albumId: number, artistId: number): void {
+  db.prepare('UPDATE albums SET artist_id = ? WHERE id = ?').run(artistId, albumId)
+}
+
+/** Recalcula play_identity_key de todas as faixas após alterar artista/título/ano do álbum. */
+export function refreshPlayIdentityKeysForAlbum(albumId: number): void {
+  const rows = db
+    .prepare(
+      `SELECT t.id, t.title, t.track_number, t.disc_number, ar.name AS artist_name, a.title AS album_title, a.year AS album_year
+       FROM tracks t
+       JOIN albums a ON t.album_id = a.id
+       JOIN artists ar ON a.artist_id = ar.id
+       WHERE t.album_id = ?`,
+    )
+    .all(albumId) as {
+    id: number
+    title: string
+    track_number: number | null
+    disc_number: number | null
+    artist_name: string
+    album_title: string
+    album_year: number | null
+  }[]
+  const used = new Set<string>()
+  for (const r of rows) {
+    let key = computePlayIdentityKey(
+      r.artist_name,
+      r.album_title,
+      r.title,
+      r.album_year,
+      r.disc_number,
+      r.track_number,
+    )
+    if (used.has(key)) {
+      key = `${key}\u0000${r.id}`
+    }
+    used.add(key)
+    db.prepare('UPDATE tracks SET play_identity_key = ? WHERE id = ?').run(key, r.id)
+  }
 }
 
 export function updateAlbumCoverPath(albumId: number, relativeFilename: string): void {

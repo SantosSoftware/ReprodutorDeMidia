@@ -18,7 +18,7 @@ export function EditTrackModal({ track, open, onClose, onSaved }: Props) {
       aria-modal
       aria-labelledby="edit-track-title"
     >
-      <div className="relative w-full max-w-md rounded-2xl border border-white/10 bg-[#2d2d2d] p-6 shadow-2xl">
+      <div className="relative w-full max-w-lg rounded-2xl border border-white/10 bg-[#2d2d2d] p-6 shadow-2xl">
         <button
           type="button"
           onClick={onClose}
@@ -36,6 +36,13 @@ export function EditTrackModal({ track, open, onClose, onSaved }: Props) {
   )
 }
 
+function parseOptionalInt(raw: string): number | null {
+  const t = raw.trim()
+  if (t === '') return null
+  const n = Number(t)
+  return Number.isFinite(n) ? Math.trunc(n) : null
+}
+
 function TrackForm({
   track,
   onClose,
@@ -46,8 +53,17 @@ function TrackForm({
   onSaved: (t: ApiTrack) => void
 }) {
   const [title, setTitle] = useState(track.title)
+  const [trackNumberStr, setTrackNumberStr] = useState(
+    track.trackNumber != null ? String(track.trackNumber) : '',
+  )
+  const [discNumberStr, setDiscNumberStr] = useState(
+    track.discNumber != null ? String(track.discNumber) : '',
+  )
   const [artistName, setArtistName] = useState(track.artistName)
   const [albumName, setAlbumName] = useState(track.albumTitle)
+  const [albumYearStr, setAlbumYearStr] = useState(
+    track.albumYear != null ? String(track.albumYear) : '',
+  )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -55,11 +71,26 @@ function TrackForm({
     e.preventDefault()
     setSaving(true)
     setError(null)
+    const yearParsed = parseOptionalInt(albumYearStr)
+    if (albumYearStr.trim() !== '' && (yearParsed == null || yearParsed < 1000 || yearParsed > 9999)) {
+      setError('Indique um ano válido (1000–9999) ou deixe em branco.')
+      setSaving(false)
+      return
+    }
+    const discParsed = parseOptionalInt(discNumberStr)
+    if (discNumberStr.trim() !== '' && (discParsed == null || discParsed < 1)) {
+      setError('Número do disco: use 1 ou superior, ou deixe em branco.')
+      setSaving(false)
+      return
+    }
     try {
       const updated = (await patchTrack(track.id, {
         title: title.trim(),
+        trackNumber: parseOptionalInt(trackNumberStr),
+        discNumber: discParsed,
         artistName: artistName.trim(),
         albumName: albumName.trim(),
+        albumYear: yearParsed,
       })) as ApiTrack
       onSaved(updated)
       onClose()
@@ -80,8 +111,36 @@ function TrackForm({
           className="mt-1 w-full rounded-lg border border-white/10 bg-[#1c1c1c] px-3 py-2 text-white focus:border-[#60cdff]/50 focus:outline-none"
         />
       </label>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="block text-sm">
+          <span className="text-gray-400">Número do disco</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            placeholder="Ex.: 1 ou 2"
+            value={discNumberStr}
+            onChange={(e) => setDiscNumberStr(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-white/10 bg-[#1c1c1c] px-3 py-2 text-white placeholder:text-gray-600 focus:border-[#60cdff]/50 focus:outline-none"
+          />
+          <span className="mt-1 block text-xs text-gray-500">
+            Volume do álbum (útil em discos duplos). Em branco se for um só disco.
+          </span>
+        </label>
+        <label className="block text-sm">
+          <span className="text-gray-400">Número da faixa</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            placeholder="Ex.: 3"
+            value={trackNumberStr}
+            onChange={(e) => setTrackNumberStr(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-white/10 bg-[#1c1c1c] px-3 py-2 text-white placeholder:text-gray-600 focus:border-[#60cdff]/50 focus:outline-none"
+          />
+          <span className="mt-1 block text-xs text-gray-500">Posição no disco. Em branco para sem número.</span>
+        </label>
+      </div>
       <label className="block text-sm">
-        <span className="text-gray-400">Artista</span>
+        <span className="text-gray-400">Artista do álbum</span>
         <input
           value={artistName}
           onChange={(e) => setArtistName(e.target.value)}
@@ -95,6 +154,18 @@ function TrackForm({
           onChange={(e) => setAlbumName(e.target.value)}
           className="mt-1 w-full rounded-lg border border-white/10 bg-[#1c1c1c] px-3 py-2 text-white focus:border-[#60cdff]/50 focus:outline-none"
         />
+      </label>
+      <label className="block text-sm">
+        <span className="text-gray-400">Ano do álbum</span>
+        <input
+          type="text"
+          inputMode="numeric"
+          placeholder="Ex.: 2020"
+          value={albumYearStr}
+          onChange={(e) => setAlbumYearStr(e.target.value)}
+          className="mt-1 w-full rounded-lg border border-white/10 bg-[#1c1c1c] px-3 py-2 text-white placeholder:text-gray-600 focus:border-[#60cdff]/50 focus:outline-none"
+        />
+        <span className="mt-1 block text-xs text-gray-500">Ano de lançamento do álbum; em branco para limpar.</span>
       </label>
       {error && <p className="text-sm text-red-400">{error}</p>}
       <div className="flex justify-end gap-2 pt-2">

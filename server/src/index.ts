@@ -13,10 +13,14 @@ import {
   getTrackWithRelations,
   incrementTrackPlayCount,
   initDb,
+  recordPlayHistory,
   registerLibraryRoot,
   setMusicLibraryPath,
+  refreshPlayIdentityKeysForAlbum,
+  updateAlbumArtistId,
   updateAlbumCoverPath,
   updateAlbumTitle,
+  updateAlbumYear,
   updateArtistImagePath,
   upsertTrack,
 } from './db.js'
@@ -99,7 +103,7 @@ app.get('/api/albums', (_req, res) => {
   const db = getDb()
   const rows = db
     .prepare(
-      `SELECT a.id, a.title, a.cover_path, ar.name AS artist_name, ar.id AS artist_id,
+      `SELECT a.id, a.title, a.year, a.cover_path, ar.name AS artist_name, ar.id AS artist_id,
               (SELECT COUNT(*) FROM tracks t WHERE t.album_id = a.id) AS track_count
        FROM albums a
        JOIN artists ar ON a.artist_id = ar.id
@@ -108,6 +112,7 @@ app.get('/api/albums', (_req, res) => {
     .all() as {
     id: number
     title: string
+    year: number | null
     cover_path: string | null
     artist_name: string
     artist_id: number
@@ -117,6 +122,7 @@ app.get('/api/albums', (_req, res) => {
   const out = rows.map((r) => ({
     id: r.id,
     title: r.title,
+    year: r.year,
     artistId: r.artist_id,
     artistName: r.artist_name,
     trackCount: r.track_count,
@@ -134,7 +140,7 @@ app.get('/api/albums/:id', (req, res) => {
   const db = getDb()
   const row = db
     .prepare(
-      `SELECT a.id, a.title, a.cover_path, ar.name AS artist_name, ar.id AS artist_id,
+      `SELECT a.id, a.title, a.year, a.cover_path, ar.name AS artist_name, ar.id AS artist_id,
               (SELECT COUNT(*) FROM tracks t WHERE t.album_id = a.id) AS track_count
        FROM albums a
        JOIN artists ar ON a.artist_id = ar.id
@@ -144,6 +150,7 @@ app.get('/api/albums/:id', (req, res) => {
     | {
         id: number
         title: string
+        year: number | null
         cover_path: string | null
         artist_name: string
         artist_id: number
@@ -157,6 +164,7 @@ app.get('/api/albums/:id', (req, res) => {
   res.json({
     id: row.id,
     title: row.title,
+    year: row.year,
     artistId: row.artist_id,
     artistName: row.artist_name,
     trackCount: row.track_count,
@@ -176,13 +184,13 @@ app.get('/api/tracks', (req, res) => {
     }
     const rows = db
       .prepare(
-        `SELECT t.id, t.title, t.duration_seconds, t.track_number, t.file_path, t.play_count,
-                a.title AS album_title, a.cover_path AS album_cover_path, ar.name AS artist_name, a.id AS album_id
+        `SELECT t.id, t.title, t.duration_seconds, t.track_number, t.disc_number, t.file_path, t.play_count,
+                a.title AS album_title, a.year AS album_year, a.cover_path AS album_cover_path, ar.name AS artist_name, a.id AS album_id
          FROM tracks t
          JOIN albums a ON t.album_id = a.id
          JOIN artists ar ON a.artist_id = ar.id
          WHERE t.album_id = ?
-         ORDER BY t.track_number IS NULL, t.track_number, t.title COLLATE NOCASE`,
+         ORDER BY t.disc_number IS NULL, t.disc_number, t.track_number IS NULL, t.track_number, t.title COLLATE NOCASE`,
       )
       .all(id) as TrackQueryRow[]
     res.json(rows.map(formatTrackRow))
@@ -197,13 +205,13 @@ app.get('/api/tracks', (req, res) => {
     }
     const rows = db
       .prepare(
-        `SELECT t.id, t.title, t.duration_seconds, t.track_number, t.file_path, t.play_count,
-                a.title AS album_title, a.cover_path AS album_cover_path, ar.name AS artist_name, a.id AS album_id
+        `SELECT t.id, t.title, t.duration_seconds, t.track_number, t.disc_number, t.file_path, t.play_count,
+                a.title AS album_title, a.year AS album_year, a.cover_path AS album_cover_path, ar.name AS artist_name, a.id AS album_id
          FROM tracks t
          JOIN albums a ON t.album_id = a.id
          JOIN artists ar ON a.artist_id = ar.id
          WHERE ar.id = ?
-         ORDER BY a.title COLLATE NOCASE, t.track_number IS NULL, t.track_number, t.title COLLATE NOCASE`,
+         ORDER BY a.title COLLATE NOCASE, t.disc_number IS NULL, t.disc_number, t.track_number IS NULL, t.track_number, t.title COLLATE NOCASE`,
       )
       .all(id) as TrackQueryRow[]
     res.json(rows.map(formatTrackRow))
@@ -212,12 +220,12 @@ app.get('/api/tracks', (req, res) => {
 
   const rows = db
     .prepare(
-      `SELECT t.id, t.title, t.duration_seconds, t.track_number, t.file_path, t.play_count,
-              a.title AS album_title, a.cover_path AS album_cover_path, ar.name AS artist_name, a.id AS album_id
+      `SELECT t.id, t.title, t.duration_seconds, t.track_number, t.disc_number, t.file_path, t.play_count,
+              a.title AS album_title, a.year AS album_year, a.cover_path AS album_cover_path, ar.name AS artist_name, a.id AS album_id
        FROM tracks t
        JOIN albums a ON t.album_id = a.id
        JOIN artists ar ON a.artist_id = ar.id
-       ORDER BY ar.name COLLATE NOCASE, a.title COLLATE NOCASE, t.track_number IS NULL, t.track_number`,
+       ORDER BY ar.name COLLATE NOCASE, a.title COLLATE NOCASE, t.disc_number IS NULL, t.disc_number, t.track_number IS NULL, t.track_number`,
     )
     .all() as TrackQueryRow[]
   res.json(rows.map(formatTrackRow))
@@ -228,9 +236,11 @@ type TrackQueryRow = {
   title: string
   duration_seconds: number | null
   track_number: number | null
+  disc_number: number | null
   file_path: string
   play_count: number
   album_title: string
+  album_year: number | null
   album_cover_path: string | null
   artist_name: string
   album_id: number
@@ -242,8 +252,10 @@ function formatTrackRow(r: TrackQueryRow) {
     title: r.title,
     durationSeconds: r.duration_seconds,
     trackNumber: r.track_number,
+    discNumber: r.disc_number,
     albumId: r.album_id,
     albumTitle: r.album_title,
+    albumYear: r.album_year,
     artistName: r.artist_name,
     playCount: r.play_count,
     albumCoverUrl: r.album_cover_path
@@ -263,8 +275,8 @@ app.get('/api/tracks/top', (req, res) => {
   const db = getDb()
   const rows = db
     .prepare(
-      `SELECT t.id, t.title, t.duration_seconds, t.track_number, t.file_path, t.play_count,
-              a.title AS album_title, a.cover_path AS album_cover_path, ar.name AS artist_name, a.id AS album_id
+      `SELECT t.id, t.title, t.duration_seconds, t.track_number, t.disc_number, t.file_path, t.play_count,
+              a.title AS album_title, a.year AS album_year, a.cover_path AS album_cover_path, ar.name AS artist_name, a.id AS album_id
        FROM tracks t
        JOIN albums a ON t.album_id = a.id
        JOIN artists ar ON a.artist_id = ar.id
@@ -274,6 +286,36 @@ app.get('/api/tracks/top', (req, res) => {
     )
     .all(limit) as TrackQueryRow[]
   res.json(rows.map(formatTrackRow))
+})
+
+app.get('/api/tracks/recent', (req, res) => {
+  const raw = req.query.limit
+  const limit = raw != null && raw !== '' ? Math.min(100, Math.max(1, Number(raw))) : 50
+  if (Number.isNaN(limit)) {
+    res.status(400).json({ error: 'limit inválido' })
+    return
+  }
+  const db = getDb()
+  const rows = db
+    .prepare(
+      `SELECT ph.id AS history_id, ph.played_at,
+              t.id, t.title, t.duration_seconds, t.track_number, t.disc_number, t.file_path, t.play_count,
+              a.title AS album_title, a.year AS album_year, a.cover_path AS album_cover_path, ar.name AS artist_name, a.id AS album_id
+       FROM play_history ph
+       JOIN tracks t ON t.id = ph.track_id
+       JOIN albums a ON t.album_id = a.id
+       JOIN artists ar ON a.artist_id = ar.id
+       ORDER BY ph.played_at DESC, ph.id DESC
+       LIMIT ?`,
+    )
+    .all(limit) as (TrackQueryRow & { history_id: number; played_at: string })[]
+  res.json(
+    rows.map((r) => ({
+      ...formatTrackRow(r),
+      historyId: r.history_id,
+      playedAt: r.played_at,
+    })),
+  )
 })
 
 app.post('/api/tracks/:id/play', (req, res) => {
@@ -288,6 +330,7 @@ app.post('/api/tracks/:id/play', (req, res) => {
     return
   }
   incrementTrackPlayCount(id)
+  recordPlayHistory(id)
   const updated = getTrackById(id)
   res.json({ id, playCount: updated?.play_count ?? row.play_count + 1 })
 })
@@ -301,8 +344,8 @@ app.get('/api/tracks/:id', (req, res) => {
   const db = getDb()
   const row = db
     .prepare(
-      `SELECT t.id, t.title, t.duration_seconds, t.track_number, t.file_path, t.play_count,
-              a.title AS album_title, a.cover_path AS album_cover_path, ar.name AS artist_name, a.id AS album_id
+      `SELECT t.id, t.title, t.duration_seconds, t.track_number, t.disc_number, t.file_path, t.play_count,
+              a.title AS album_title, a.year AS album_year, a.cover_path AS album_cover_path, ar.name AS artist_name, a.id AS album_id
        FROM tracks t
        JOIN albums a ON t.album_id = a.id
        JOIN artists ar ON a.artist_id = ar.id
@@ -371,6 +414,9 @@ app.patch('/api/tracks/:id', (req, res) => {
     title?: string
     artistName?: string
     albumName?: string
+    trackNumber?: number | null | string
+    discNumber?: number | null | string
+    albumYear?: number | null | string
   }
   const current = getTrackWithRelations(id)
   if (!current) {
@@ -395,7 +441,43 @@ app.patch('/api/tracks/:id', (req, res) => {
       ? body.title.trim()
       : current.title
 
-  upsertTrack(current.file_path, newAlbumId, title, current.duration_seconds, current.track_number)
+  let nextTrackNumber = current.track_number
+  if ('trackNumber' in body) {
+    const raw = body.trackNumber
+    if (raw === null || (typeof raw === 'string' && raw.trim() === '')) {
+      nextTrackNumber = null
+    } else {
+      const n = Number(raw)
+      nextTrackNumber = Number.isFinite(n) ? Math.trunc(n) : null
+    }
+  }
+
+  let nextDiscNumber = current.disc_number
+  if ('discNumber' in body) {
+    const raw = body.discNumber
+    if (raw === null || (typeof raw === 'string' && raw.trim() === '')) {
+      nextDiscNumber = null
+    } else {
+      const n = Number(raw)
+      nextDiscNumber = Number.isFinite(n) && n >= 1 ? Math.trunc(n) : null
+    }
+  }
+
+  if ('albumYear' in body) {
+    const rawY = body.albumYear
+    if (rawY === null || (typeof rawY === 'string' && rawY.trim() === '')) {
+      updateAlbumYear(newAlbumId, null)
+    } else {
+      const y = Number(rawY)
+      if (Number.isFinite(y) && y >= 1000 && y <= 9999) {
+        updateAlbumYear(newAlbumId, Math.trunc(y))
+      } else {
+        updateAlbumYear(newAlbumId, null)
+      }
+    }
+  }
+
+  upsertTrack(current.file_path, newAlbumId, title, current.duration_seconds, nextTrackNumber, nextDiscNumber)
 
   const updated = getTrackWithRelations(id)
   if (!updated) {
@@ -409,8 +491,10 @@ app.patch('/api/tracks/:id', (req, res) => {
     title: updated.title,
     durationSeconds: updated.duration_seconds,
     trackNumber: updated.track_number,
+    discNumber: updated.disc_number,
     albumId: newAlbumId,
     albumTitle,
+    albumYear: updated.album_year,
     playCount: updated.play_count,
     artistName:
       typeof body.artistName === 'string' && body.artistName.trim()
@@ -429,7 +513,11 @@ app.patch('/api/albums/:id', (req, res) => {
     res.status(400).json({ error: 'id inválido' })
     return
   }
-  const body = req.body as { title?: string }
+  const body = req.body as {
+    title?: string
+    artistName?: string
+    year?: number | null | string
+  }
   const db = getDb()
   const album = db.prepare('SELECT * FROM albums WHERE id = ?').get(id) as
     | { id: number; title: string; cover_path: string | null; artist_id: number }
@@ -438,22 +526,64 @@ app.patch('/api/albums/:id', (req, res) => {
     res.status(404).json({ error: 'Álbum não encontrado' })
     return
   }
+  let touched = false
   if (typeof body.title === 'string' && body.title.trim()) {
     updateAlbumTitle(id, body.title.trim())
+    touched = true
   }
-  const ar = db.prepare('SELECT name FROM artists WHERE id = ?').get(album.artist_id) as
-    | { name: string }
+  if (typeof body.artistName === 'string' && body.artistName.trim()) {
+    const artistId = findOrCreateArtist(body.artistName.trim())
+    updateAlbumArtistId(id, artistId)
+    touched = true
+  }
+  if ('year' in body) {
+    const rawY = body.year
+    if (rawY === null || (typeof rawY === 'string' && rawY.trim() === '')) {
+      updateAlbumYear(id, null)
+    } else {
+      const y = Number(rawY)
+      if (Number.isFinite(y) && y >= 1000 && y <= 9999) {
+        updateAlbumYear(id, Math.trunc(y))
+      } else {
+        updateAlbumYear(id, null)
+      }
+    }
+    touched = true
+  }
+  if (touched) {
+    refreshPlayIdentityKeysForAlbum(id)
+  }
+  const row = db
+    .prepare(
+      `SELECT a.id, a.title, a.year, a.cover_path, ar.name AS artist_name, ar.id AS artist_id,
+              (SELECT COUNT(*) FROM tracks t WHERE t.album_id = a.id) AS track_count
+       FROM albums a
+       JOIN artists ar ON a.artist_id = ar.id
+       WHERE a.id = ?`,
+    )
+    .get(id) as
+    | {
+        id: number
+        title: string
+        year: number | null
+        cover_path: string | null
+        artist_name: string
+        artist_id: number
+        track_count: number
+      }
     | undefined
-  const updated = db.prepare('SELECT * FROM albums WHERE id = ?').get(id) as {
-    id: number
-    title: string
-    cover_path: string | null
+  if (!row) {
+    res.status(404).json({ error: 'Álbum não encontrado' })
+    return
   }
   res.json({
-    id: updated.id,
-    title: updated.title,
-    artistName: ar?.name ?? '',
-    coverUrl: updated.cover_path ? `/api/covers/${encodeURIComponent(updated.cover_path)}` : null,
+    id: row.id,
+    title: row.title,
+    year: row.year,
+    artistId: row.artist_id,
+    artistName: row.artist_name,
+    trackCount: row.track_count,
+    coverUrl: row.cover_path ? `/api/covers/${encodeURIComponent(row.cover_path)}` : null,
   })
 })
 
@@ -530,7 +660,7 @@ app.get('/api/artists/:id/albums', (req, res) => {
   }
   const rows = db
     .prepare(
-      `SELECT a.id, a.title, a.cover_path, ar.name AS artist_name, ar.id AS artist_id,
+      `SELECT a.id, a.title, a.year, a.cover_path, ar.name AS artist_name, ar.id AS artist_id,
               (SELECT COUNT(*) FROM tracks t WHERE t.album_id = a.id) AS track_count
        FROM albums a
        JOIN artists ar ON a.artist_id = ar.id
@@ -540,6 +670,7 @@ app.get('/api/artists/:id/albums', (req, res) => {
     .all(artistId) as {
     id: number
     title: string
+    year: number | null
     cover_path: string | null
     artist_name: string
     artist_id: number
@@ -548,6 +679,7 @@ app.get('/api/artists/:id/albums', (req, res) => {
   const out = rows.map((r) => ({
     id: r.id,
     title: r.title,
+    year: r.year,
     artistId: r.artist_id,
     artistName: r.artist_name,
     trackCount: r.track_count,
@@ -628,14 +760,36 @@ app.get('/api/artists', (_req, res) => {
   )
 })
 
+const clientDist = process.env.CLIENT_DIST?.trim()
+if (process.env.SERVE_SPA === '1' && clientDist) {
+  app.use(express.static(clientDist))
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      next()
+      return
+    }
+    if (req.path.startsWith('/api')) {
+      next()
+      return
+    }
+    res.sendFile(path.join(clientDist, 'index.html'))
+  })
+}
+
+let resolveReady!: () => void
+export const serverReady = new Promise<void>((resolve) => {
+  resolveReady = resolve
+})
+
 const server = app.listen(PORT, () => {
   console.log(`API em http://localhost:${PORT}`)
+  resolveReady()
 })
 
 server.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {
     console.error(
-      `A porta ${PORT} já está em uso (ficou um servidor à escuta). Feche esse processo ou use outra porta (PowerShell: $env:PORT=3002; npm run dev) e alinhe o proxy em client/vite.config.ts.`,
+      `A porta ${PORT} já está em uso (ficou um servidor à escuta). Feche esse processo ou use outra porta (PowerShell: $env:PORT=3002; npm run dev) e alinhe o proxy em src/vite.config.ts.`,
     )
   } else {
     console.error(err)

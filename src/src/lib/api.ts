@@ -3,6 +3,7 @@ const API = ''
 export type ApiAlbum = {
   id: number
   title: string
+  year: number | null
   artistId: number
   artistName: string
   trackCount: number
@@ -13,14 +14,23 @@ export type ApiTrack = {
   id: number
   title: string
   durationSeconds: number | null
+  /** Número da faixa no disco. */
   trackNumber: number | null
+  /** Volume / disco (1, 2, … em edições com vários discos). */
+  discNumber: number | null
   albumId: number
   albumTitle: string
+  /** Ano de lançamento do álbum (metadado ao nível do álbum). */
+  albumYear: number | null
   artistName: string
   /** Capa do álbum desta faixa (para o player). */
   albumCoverUrl: string | null
   playCount: number
   streamUrl: string
+  /** Só em `/api/tracks/recent`: id da linha de histórico (chave única na lista). */
+  historyId?: number
+  /** Só em `/api/tracks/recent`: data/hora da reprodução (SQLite datetime). */
+  playedAt?: string
 }
 
 export type ApiArtist = {
@@ -59,6 +69,13 @@ export async function fetchTracksByArtist(artistId: number): Promise<ApiTrack[]>
 export async function fetchTopTracks(limit = 50): Promise<ApiTrack[]> {
   const r = await fetch(`${API}/api/tracks/top?limit=${limit}`)
   if (!r.ok) throw new Error('Não foi possível carregar o top de faixas')
+  return r.json()
+}
+
+/** Últimas faixas reproduzidas, da mais recente para a mais antiga (playlist automática). */
+export async function fetchRecentTracks(limit = 50): Promise<ApiTrack[]> {
+  const r = await fetch(`${API}/api/tracks/recent?limit=${limit}`)
+  if (!r.ok) throw new Error('Não foi possível carregar o histórico de reproduções')
   return r.json()
 }
 
@@ -144,7 +161,14 @@ export async function syncLibrary(): Promise<LibrarySyncResult> {
 
 export async function patchTrack(
   id: number,
-  body: { title?: string; artistName?: string; albumName?: string },
+  body: {
+    title?: string
+    artistName?: string
+    albumName?: string
+    trackNumber?: number | null
+    discNumber?: number | null
+    albumYear?: number | null
+  },
 ): Promise<ApiTrack> {
   const r = await fetch(`${API}/api/tracks/${id}`, {
     method: 'PATCH',
@@ -157,8 +181,12 @@ export async function patchTrack(
 
 export async function patchAlbum(
   id: number,
-  body: { title?: string },
-): Promise<{ id: number; title: string; artistName: string; coverUrl: string | null }> {
+  body: {
+    title?: string
+    artistName?: string
+    year?: number | null
+  },
+): Promise<ApiAlbum> {
   const r = await fetch(`${API}/api/albums/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
